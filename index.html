@@ -1,0 +1,298 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EA 8 - Lichter auf einer Kreisbahn mit Toon Shading</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gl-matrix@2.8.1/dist/gl-matrix-min.js"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <script src="ext/gl-matrix.js"></script>
+    <script src="GVT_Src_vertexData_sphere.js"></script>
+    <script src="GVT_Src_vertexData_torus.js"></script>
+    <script src="GVT_Src_vertexData_plane.js"></script>
+    <script src="BEL_Src_tpl.js"></script>
+
+    <script type="x-shader/x-vertex" id="vertexshader">
+        attribute vec3 aPosition;
+        attribute vec3 aNormal;
+
+        uniform mat4 uPMatrix;
+        uniform mat4 uMVMatrix;
+        uniform mat3 uNMatrix;
+
+        varying vec3 vNormal;
+        varying vec4 vPosition;
+
+        void main(){
+            // Calculate vertex position in eye coordinates.
+            vec4 tPosition = uMVMatrix * vec4(aPosition, 1.0);
+            // Calculate projektion.
+            gl_Position = uPMatrix * tPosition;
+
+            vec3 tNormal = normalize(uNMatrix * aNormal);
+
+            vPosition = tPosition;
+            vNormal = tNormal;
+        }
+    </script>
+
+
+    <script type="x-shader/x-fragment" id="fragmentshader">
+        precision mediump float;
+
+        varying vec3 vNormal;
+        varying vec4 vPosition;
+
+        struct PhongMaterial {
+            vec3 ka;
+            vec3 kd;
+            vec3 ks;
+            float ke;
+        };
+        uniform PhongMaterial material;
+
+        uniform vec3 ambientLight;
+        uniform bool uToonShading;
+
+        const int MAX_LIGHT_SOURCES = 8;
+        struct LightSource {
+            bool isOn;
+            vec3 position;
+            vec3 color;
+        };
+        uniform LightSource light[MAX_LIGHT_SOURCES];
+
+        // Phong berechnung
+        vec3 phongSingle(vec3 p, vec3 n, vec3 v, LightSource l) {
+            vec3 L = l.color;
+            vec3 s = normalize(l.position - p);
+            vec3 r = reflect(-s, n);
+
+            float lambert = max(dot(s, n), 0.0);
+            float rv = max(dot(r, v), 0.0);
+
+            // Ohne Toon: klassische Berechnung
+            vec3 diffuse = material.kd * L * lambert;
+            vec3 specular = material.ks * L * pow(rv, material.ke);
+
+            // Falls Toon-Shading aktiv, quantisieren von Lambert und Specular
+            if (uToonShading) {
+                // Diffuse Quantisierung basierend auf lambert:
+                float lambertStep;
+                if (lambert < 0.3) {
+                    lambertStep = 0.0;
+                } else if (lambert < 0.7) {
+                    lambertStep = 0.5;
+                } else {
+                    lambertStep = 1.0;
+                }
+
+                // Diffusen Anteil auf die quantisierte Stufe setzen:
+                diffuse = material.kd * L * lambertStep;
+
+                // Spekular-Anteil stark reduzieren oder nur bei sehr hohem rv zulassen.
+                if (rv > 0.95) {
+                    specular = material.ks * L; // Ein knackig heller Fleck
+                } else {
+                    specular = vec3(0.0); // Kein oder sehr reduzierter Spekularanteil
+                }
+            }
+
+            return diffuse + specular;
+        }
+
+        vec3 phong(vec3 p, vec3 n, vec3 v) {
+            // Ambient bleibt unverändert
+            vec3 result = material.ka * ambientLight;
+            for (int j=0; j < MAX_LIGHT_SOURCES; j++) {
+                if (light[j].isOn) {
+                    result += phongSingle(p, n, v, light[j]);
+                }
+            }
+            return result;
+        }
+
+        void main() {
+            vec3 v = normalize(-vPosition.xyz);
+            vec3 norm = normalize(vNormal);
+
+            vec3 color = phong(vPosition.xyz, norm, v);
+            gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <link rel="stylesheet" href="style.css">
+
+
+</head>
+
+<body data-bs-spy="scroll" data-bs-target=".navbar" data-bs-offset="70" onload="app.start()">
+    <nav class="navbar navbar-expand-lg navbar-light fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">EA 8 - Lichter auf einer Kreisbahn mit Toon Shading</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item"><a class="nav-link" href="#teil1">Animation</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link" href="#documentationSection">Dokumentation</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5 pt-5" id="mainContent">
+        <section id="teil1" class="mb-4">
+            <div class="row">
+                <!-- Left Column for Canvas -->
+                <div class="col-md-6">
+
+                    <h2>Animation</h2>
+                    <canvas id="canvas" width="600" height="500"></canvas>
+                </div>
+                <!-- Right Column for Controls -->
+<div class="col-md-6 d-flex flex-column align-items-start justify-content-center">
+    <h3>Steuerung</h3>
+    <p>Nutzen Sie die Tastatur, um die Kamera und die Modelle in der Szene zu steuern. Beachten Sie, dass einige Steuerungen zwischen Groß- und Kleinschreibung unterscheiden:</p>
+    <ul>
+        <li>
+            <strong>Kamerasteuerung (Gegenbewegung mit shift):</strong>
+            <ul>
+                <li><strong>C:</strong> Kamera um die Szene rotieren.</li>
+                <li><strong>H:</strong> Kamera vertikal bewegen (nach oben/unten).</li>
+                <li><strong>D:</strong> Kameraentfernung vom Zentrum ändern.</li>
+                <li><strong>V:</strong> Öffnungswinkel (FOV) der Kamera anpassen.</li>
+
+            </ul>
+        </li>
+
+
+        <br>
+        <li>
+            <strong>Animation:</strong>
+            <ul>
+                <li><strong>L:</strong> Ein- / Ausschalten der Bewegung der Lichtquellen</li>
+            </ul>
+        </li>
+        <br>
+        <li>
+            <strong>Toon-Shading:</strong>
+            <ul>
+                <li><strong>T:</strong> Wechseln des Stils </li>
+            </ul>
+        </li>
+    </ul>
+</div>
+
+            </div>
+        </section>
+
+        
+
+<section id="documentationSection" class="mb-4">
+    <h2>Dokumentation</h2>
+
+    <h3>Bewegliche Lichtquellen</h3>
+    <p>
+        In dieser Übung wurden zwei Lichtquellen so implementiert, dass sie auf einer Kreisbahn um die Szene wandern. Die Positionen der Lichter werden hierbei kontinuierlich aktualisiert, 
+        sofern die Lichtbewegung aktiviert ist. Die Taste <code>L</code> schaltet die Bewegung ein oder aus.
+    </p>
+    <p>
+        Zunächst werden die Startpositionen der Lichtquellen berechnet, indem Winkel und Radius für die Kreisbahn festgelegt werden:
+    </p>
+    <pre><code class="language-javascript">
+// Globale Einstellungen für die Lichtbewegung
+const lightRadius = 5.0;
+let lightAngle = Math.PI / 4; // Ausgangswinkel
+
+// Startpositionen für Licht 1 und Licht 2
+const startAngle1 = Math.PI / 4;            // 45°
+const startAngle2 = startAngle1 + Math.PI;  // um 180° versetzt
+
+const x1 = Math.cos(startAngle1) * lightRadius;
+const z1 = Math.sin(startAngle1) * lightRadius;
+const x2 = Math.cos(startAngle2) * lightRadius;
+const z2 = Math.sin(startAngle2) * lightRadius;
+
+illumination.light[0].position = [x1, 2.0, z1];
+illumination.light[1].position = [x2, 2.0, z2];
+    </code></pre>
+    <br />
+    <p>
+        Während des Render-Vorgangs werden die Lichtpositionen bei eingeschalteter Bewegung (Taste <code>L</code>) in jeder Frame neu berechnet:
+    </p>
+    <pre><code class="language-javascript">
+if (lightMoving) {
+    lightAngle += lightSpeed; // Winkel anpassen
+
+    // Neue Positionen auf der Kreisbahn berechnen
+    const x1 = Math.cos(lightAngle) * lightRadius;
+    const z1 = Math.sin(lightAngle) * lightRadius;
+    const x2 = Math.cos(lightAngle + Math.PI) * lightRadius;
+    const z2 = Math.sin(lightAngle + Math.PI) * lightRadius;
+
+    illumination.light[0].position = [x1, 2.0, z1];
+    illumination.light[1].position = [x2, 2.0, z2];
+}
+    </code></pre>
+
+    <p>
+        Dieses Vorgehen ermöglicht eine dynamische Beleuchtungssituation, bei der die Lichtquellen durch die Szene kreisen und so ständig wechselnde Helligkeits- 
+        und Schatteneffekte erzeugen.
+    </p>
+
+    <br />
+    <h3>Toon-Shading (Cel-Shading)</h3>
+    <p>
+        Neben der klassischen Phong-Beleuchtung wurde Toon-Shading hinzugefügt, um einen cartoonartigen, abgestuften Beleuchtungsstil zu erreichen. 
+        Durch Drücken der Taste <code>T</code> lässt sich zwischen normaler Phong-Beleuchtung und Toon-Shading wechseln.
+    </p>
+
+    <p>
+        Im Fragment-Shader wird bei aktiviertem Toon-Shading der diffuse sowie der spekulare Anteil der Beleuchtung quantisiert. 
+        Dadurch entstehen harte Helligkeitsstufen anstatt fließender Übergänge:
+    </p>
+    <pre><code class="language-glsl">
+if (uToonShading) {
+    float lambertStep;
+    if (lambert < 0.3) {
+        lambertStep = 0.0;
+    } else if (lambert < 0.7) {
+        lambertStep = 0.5;
+    } else {
+        lambertStep = 1.0;
+    }
+
+    // Diffuse quantisieren
+    diffuse = material.kd * L * lambertStep;
+
+    // Spekularer Anteil nur bei sehr hohem rv
+    if (rv > 0.95) {
+        specular = material.ks * L;
+    } else {
+        specular = vec3(0.0);
+    }
+}
+    </code></pre>
+
+    <p>
+        Das Ergebnis ist ein vereinfachter, zeichentrickähnlicher Beleuchtungsstil. 
+        Ohne Toon-Shading verbleibt der Shader bei der klassischen Phong-Berechnung für weiche, realistische Lichtverläufe.
+    </p>
+</section>
+
+
+
+    </div>
+
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
